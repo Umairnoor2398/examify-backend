@@ -1,0 +1,9 @@
+.env
+*.exe
+*.out
+bin/
+vendor/
+uploads/*
+!uploads/.gitkeep
+*.log
+.DS_Store
