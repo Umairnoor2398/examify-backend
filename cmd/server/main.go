@@ -121,12 +121,12 @@ func main() {
 			adminRoutes.POST("/books/:id/pdf", func(c *gin.Context) { adminHandler.UploadBookPDF(c, cfg) })
 
 			// Chapters
-			adminRoutes.GET("/books/:bookId/chapters", adminHandler.ListChapters)
-			adminRoutes.POST("/books/:bookId/chapters", adminHandler.CreateChapter)
-			adminRoutes.GET("/books/:bookId/chapters/:chapterId", adminHandler.GetChapter)
-			adminRoutes.PUT("/books/:bookId/chapters/:chapterId", adminHandler.UpdateChapter)
-			adminRoutes.DELETE("/books/:bookId/chapters/:chapterId", adminHandler.DeleteChapter)
-			adminRoutes.POST("/books/:bookId/chapters/import", adminHandler.ImportChaptersCSV)
+			adminRoutes.GET("/books/:id/chapters", adminHandler.ListChapters)
+			adminRoutes.POST("/books/:id/chapters", adminHandler.CreateChapter)
+			adminRoutes.GET("/books/:id/chapters/:chapterId", adminHandler.GetChapter)
+			adminRoutes.PUT("/books/:id/chapters/:chapterId", adminHandler.UpdateChapter)
+			adminRoutes.DELETE("/books/:id/chapters/:chapterId", adminHandler.DeleteChapter)
+			adminRoutes.POST("/books/:id/chapters/import", adminHandler.ImportChaptersCSV)
 
 			// Questions
 			adminRoutes.GET("/chapters/:chapterId/questions", adminHandler.ListQuestions)
@@ -160,16 +160,20 @@ func main() {
 			schoolRoutes.POST("/books/import", schoolHandler.ImportCustomBooksCSV)
 
 			// Chapters & Questions for custom books (reuse admin handlers)
-			schoolRoutes.GET("/books/:bookId/chapters", adminHandler.ListChapters)
-			schoolRoutes.POST("/books/:bookId/chapters", adminHandler.CreateChapter)
-			schoolRoutes.PUT("/books/:bookId/chapters/:chapterId", adminHandler.UpdateChapter)
-			schoolRoutes.DELETE("/books/:bookId/chapters/:chapterId", adminHandler.DeleteChapter)
-			schoolRoutes.POST("/books/:bookId/chapters/import", adminHandler.ImportChaptersCSV)
+			schoolRoutes.GET("/books/:id/chapters", adminHandler.ListChapters)
+			schoolRoutes.POST("/books/:id/chapters", adminHandler.CreateChapter)
+			schoolRoutes.PUT("/books/:id/chapters/:chapterId", adminHandler.UpdateChapter)
+			schoolRoutes.DELETE("/books/:id/chapters/:chapterId", adminHandler.DeleteChapter)
+			schoolRoutes.POST("/books/:id/chapters/import", adminHandler.ImportChaptersCSV)
 			schoolRoutes.GET("/chapters/:chapterId/questions", adminHandler.ListQuestions)
 			schoolRoutes.POST("/chapters/:chapterId/questions", adminHandler.CreateQuestion)
 			schoolRoutes.PUT("/chapters/:chapterId/questions/:id", adminHandler.UpdateQuestion)
 			schoolRoutes.DELETE("/chapters/:chapterId/questions/:id", adminHandler.DeleteQuestion)
 			schoolRoutes.POST("/chapters/:chapterId/questions/import", adminHandler.ImportQuestionsCSV)
+
+			// Read-only subjects & classes for book creation
+			schoolRoutes.GET("/subjects", adminHandler.ListSubjects)
+			schoolRoutes.GET("/classes", adminHandler.ListClasses)
 
 			// Papers
 			schoolRoutes.GET("/papers", schoolHandler.ListPapers)
@@ -186,6 +190,8 @@ func main() {
 		teacherRoutes := v1.Group("/teacher")
 		teacherRoutes.Use(middleware.Auth(cfg), middleware.RequireRole(models.RoleTeacher))
 		{
+			teacherRoutes.GET("/classes", teacherHandler.ListFilteredClasses)
+			teacherRoutes.GET("/subjects", teacherHandler.ListFilteredSubjects)
 			teacherRoutes.GET("/books", teacherHandler.ListBooks)
 			teacherRoutes.GET("/books/:bookId/chapters", teacherHandler.ListBookChapters)
 			teacherRoutes.GET("/questions", teacherHandler.GetFilteredQuestions)

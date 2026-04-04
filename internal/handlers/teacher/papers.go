@@ -43,6 +43,63 @@ func getSchoolForTeacher(userID string) (*models.School, error) {
 	return &school, nil
 }
 
+func getSchoolCurriculaIDs(schoolID string) []string {
+	var ids []string
+	database.DB.Raw("SELECT curriculum_id FROM school_curricula WHERE school_id = ?", schoolID).Scan(&ids)
+	return ids
+}
+
+func ListFilteredClasses(c *gin.Context) {
+	userID := c.GetString("user_id")
+	school, err := getSchoolForTeacher(userID)
+	if err != nil {
+		response.NotFound(c, "School not found for this teacher")
+		return
+	}
+	curriculaIDs := getSchoolCurriculaIDs(school.ID)
+
+	// Classes from curriculum books + custom books of this school
+	var classes []models.Class
+	database.DB.Raw(`
+		SELECT DISTINCT cl.* FROM classes cl
+		JOIN book_classes bc ON bc.class_id = cl.id
+		JOIN books b ON b.id = bc.book_id
+		WHERE b.school_id = ?
+		   OR (b.school_id IS NULL AND b.id IN (
+		       SELECT book_id FROM book_curricula WHERE curriculum_id IN ?
+		   ))
+	`, school.ID, curriculaIDs).Scan(&classes)
+	response.Success(c, classes, "")
+}
+
+func ListFilteredSubjects(c *gin.Context) {
+	userID := c.GetString("user_id")
+	school, err := getSchoolForTeacher(userID)
+	if err != nil {
+		response.NotFound(c, "School not found for this teacher")
+		return
+	}
+	curriculaIDs := getSchoolCurriculaIDs(school.ID)
+	classID := c.Query("class_id")
+
+	q := `
+		SELECT DISTINCT s.* FROM subjects s
+		JOIN book_subjects bs ON bs.subject_id = s.id
+		JOIN books b ON b.id = bs.book_id
+		WHERE (b.school_id = ?
+		    OR (b.school_id IS NULL AND b.id IN (
+		        SELECT book_id FROM book_curricula WHERE curriculum_id IN ?
+		    )))`
+	args := []interface{}{school.ID, curriculaIDs}
+	if classID != "" {
+		q += ` AND b.id IN (SELECT book_id FROM book_classes WHERE class_id = ?)`
+		args = append(args, classID)
+	}
+	var subjects []models.Subject
+	database.DB.Raw(q, args...).Scan(&subjects)
+	response.Success(c, subjects, "")
+}
+
 func ListBooks(c *gin.Context) {
 	userID := c.GetString("user_id")
 	school, err := getSchoolForTeacher(userID)
@@ -50,26 +107,34 @@ func ListBooks(c *gin.Context) {
 		response.NotFound(c, "School not found for this teacher")
 		return
 	}
+	curriculaIDs := getSchoolCurriculaIDs(school.ID)
+	classID := c.Query("class_id")
+	subjectID := c.Query("subject_id")
 
-	var curriculaIDs []string
-	database.DB.Raw("SELECT curriculum_id FROM school_curricula WHERE school_id = ?", school.ID).
-		Scan(&curriculaIDs)
+	q := `
+		SELECT DISTINCT b.id FROM books b
+		WHERE (b.school_id = ?
+		    OR (b.school_id IS NULL AND b.id IN (
+		        SELECT book_id FROM book_curricula WHERE curriculum_id IN ?
+		    )))`
+	args := []interface{}{school.ID, curriculaIDs}
+	if classID != "" {
+		q += ` AND b.id IN (SELECT book_id FROM book_classes WHERE class_id = ?)`
+		args = append(args, classID)
+	}
+	if subjectID != "" {
+		q += ` AND b.id IN (SELECT book_id FROM book_subjects WHERE subject_id = ?)`
+		args = append(args, subjectID)
+	}
+	var bookIDs []string
+	database.DB.Raw(q, args...).Scan(&bookIDs)
 
 	var books []models.Book
-	if len(curriculaIDs) > 0 {
-		database.DB.Raw(`
-			SELECT DISTINCT b.* FROM books b
-			LEFT JOIN book_curricula bc ON bc.book_id = b.id
-			WHERE (b.school_id IS NULL AND bc.curriculum_id IN ?) OR b.school_id = ?
-		`, curriculaIDs, school.ID).
-			Preload("Subjects").Preload("Classes").Preload("Curricula").
-			Scan(&books)
-	} else {
-		database.DB.Where("school_id = ?", school.ID).
+	if len(bookIDs) > 0 {
+		database.DB.Where("id IN ?", bookIDs).
 			Preload("Subjects").Preload("Classes").
 			Find(&books)
 	}
-
 	response.Success(c, books, "")
 }
 
@@ -82,6 +147,9 @@ func ListBookChapters(c *gin.Context) {
 
 func GetFilteredQuestions(c *gin.Context) {
 	chapterIDs := c.QueryArray("chapter_ids")
+	if len(chapterIDs) == 0 {
+		chapterIDs = c.QueryArray("chapter_ids[]")
+	}
 	difficulty := c.Query("difficulty")
 	tags := c.QueryArray("tags")
 	pg := utils.GetPagination(c)

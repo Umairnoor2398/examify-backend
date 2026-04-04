@@ -202,14 +202,14 @@ func ImportBooksCSV(c *gin.Context, cfg *config.Config) {
 
 // Chapters
 func ListChapters(c *gin.Context) {
-	bookID := c.Param("bookId")
+	bookID := c.Param("id")
 	var chapters []models.Chapter
 	database.DB.Where("book_id = ?", bookID).Order("order_index asc").Find(&chapters)
 	response.Success(c, chapters, "")
 }
 
 func CreateChapter(c *gin.Context) {
-	bookID := c.Param("bookId")
+	bookID := c.Param("id")
 	var req createChapterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, err.Error())
@@ -279,7 +279,7 @@ func DeleteChapter(c *gin.Context) {
 }
 
 func ImportChaptersCSV(c *gin.Context) {
-	bookID := c.Param("bookId")
+	bookID := c.Param("id")
 	var book models.Book
 	if err := database.DB.First(&book, "id = ?", bookID).Error; err != nil {
 		response.NotFound(c, "Book not found")

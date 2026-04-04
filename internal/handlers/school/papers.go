@@ -25,6 +25,7 @@ func ListPapers(c *gin.Context) {
 		Preload("Creator").
 		Preload("Book").
 		Preload("Chapters").
+		Preload("Questions").
 		Preload("Config")
 
 	q.Count(&total)
@@ -51,7 +52,7 @@ func GetPaper(c *gin.Context) {
 	if err := database.DB.
 		Where("id = ? AND school_id = ? AND status = ?", id, school.ID, models.PaperSubmitted).
 		Preload("Creator").
-		Preload("Book").
+		Preload("Book.Subjects").
 		Preload("Chapters").
 		Preload("Questions.Question.Options").
 		Preload("Questions.Question.AnswerKey").
@@ -62,6 +63,7 @@ func GetPaper(c *gin.Context) {
 		return
 	}
 
+	paper.School = *school
 	response.Success(c, paper, "")
 }
 
