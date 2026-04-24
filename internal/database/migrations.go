@@ -27,14 +27,15 @@ BEGIN
 
     IF p_action = 'soft_delete' THEN
         UPDATE schools SET deleted_at = NOW() WHERE id = p_school_id AND deleted_at IS NULL;
-        UPDATE users SET is_active = FALSE WHERE id = v_user_id;
-        UPDATE users SET is_active = FALSE
-            WHERE id IN (SELECT user_id FROM teacher_schools WHERE school_id = p_school_id);
+        UPDATE users SET is_active = FALSE, deleted_at = NOW() WHERE id = v_user_id AND deleted_at IS NULL;
+        UPDATE users SET is_active = FALSE, deleted_at = NOW()
+            WHERE id IN (SELECT user_id FROM teacher_schools WHERE school_id = p_school_id)
+            AND deleted_at IS NULL;
 
     ELSEIF p_action = 'activate' THEN
         UPDATE schools SET deleted_at = NULL WHERE id = p_school_id;
-        UPDATE users SET is_active = TRUE WHERE id = v_user_id;
-        UPDATE users SET is_active = TRUE
+        UPDATE users SET is_active = TRUE, deleted_at = NULL WHERE id = v_user_id;
+        UPDATE users SET is_active = TRUE, deleted_at = NULL
             WHERE id IN (SELECT user_id FROM teacher_schools WHERE school_id = p_school_id);
 
     ELSEIF p_action = 'deactivate' THEN

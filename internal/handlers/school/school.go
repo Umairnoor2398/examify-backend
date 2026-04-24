@@ -9,6 +9,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const (
+	schoolNotFound = "School not found"
+	userIDFilter   = "id = ?"
+)
+
 func getSchoolByUserID(userID string) (*models.School, error) {
 	var school models.School
 	err := database.DB.Preload("Curricula").First(&school, "user_id = ?", userID).Error
@@ -19,12 +24,12 @@ func GetProfile(c *gin.Context) {
 	userID := c.GetString("user_id")
 	school, err := getSchoolByUserID(userID)
 	if err != nil {
-		response.NotFound(c, "School not found")
+		response.NotFound(c, schoolNotFound)
 		return
 	}
 
 	var user models.User
-	database.DB.First(&user, "id = ?", userID)
+	database.DB.First(&user, userIDFilter, userID)
 
 	response.Success(c, gin.H{
 		"school": school,
@@ -50,7 +55,7 @@ func UpdateProfile(c *gin.Context) {
 	userID := c.GetString("user_id")
 	school, err := getSchoolByUserID(userID)
 	if err != nil {
-		response.NotFound(c, "School not found")
+		response.NotFound(c, schoolNotFound)
 		return
 	}
 
@@ -67,7 +72,7 @@ func UpdateProfile(c *gin.Context) {
 
 	// contact_email lives on the user record
 	if req.ContactEmail != "" {
-		database.DB.Model(&models.User{}).Where("id = ?", userID).Update("contact_email", req.ContactEmail)
+		database.DB.Model(&models.User{}).Where(userIDFilter, userID).Update("contact_email", req.ContactEmail)
 	}
 	response.Success(c, school, "Profile updated")
 }
@@ -76,7 +81,7 @@ func UploadLogo(c *gin.Context, cfg *config.Config) {
 	userID := c.GetString("user_id")
 	school, err := getSchoolByUserID(userID)
 	if err != nil {
-		response.NotFound(c, "School not found")
+		response.NotFound(c, schoolNotFound)
 		return
 	}
 
@@ -88,6 +93,10 @@ func UploadLogo(c *gin.Context, cfg *config.Config) {
 	defer file.Close()
 
 	if err := utils.ValidateFileMIME(file, utils.AllowedImageMIMEs); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if err := utils.ValidateSquareDimensions(file); err != nil {
 		response.BadRequest(c, err.Error())
 		return
 	}
@@ -116,6 +125,10 @@ func UploadAvatar(c *gin.Context, cfg *config.Config) {
 		response.BadRequest(c, err.Error())
 		return
 	}
+	if err := utils.ValidateSquareDimensions(file); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
 
 	avatarURL, err := utils.SaveUploadedFile(file, header, cfg.Upload.Dir, "avatars", cfg.Upload.MaxSize)
 	if err != nil {
@@ -123,7 +136,7 @@ func UploadAvatar(c *gin.Context, cfg *config.Config) {
 		return
 	}
 
-	if err := database.DB.Model(&models.User{}).Where("id = ?", userID).Update("avatar_url", avatarURL).Error; err != nil {
+	if err := database.DB.Model(&models.User{}).Where(userIDFilter, userID).Update("avatar_url", avatarURL).Error; err != nil {
 		response.InternalError(c, "Failed to save avatar")
 		return
 	}

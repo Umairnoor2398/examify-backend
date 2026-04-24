@@ -46,6 +46,7 @@ func ListBooks(c *gin.Context) {
 		q = q.Where("title LIKE ?", "%"+search+"%")
 	}
 
+	q = q.Order("books.title ASC")
 	q.Count(&total)
 	q.Limit(pg.PerPage).Offset(pg.Offset).Find(&books)
 

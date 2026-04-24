@@ -2,6 +2,9 @@ package utils
 
 import (
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"mime/multipart"
 	"os"
@@ -13,6 +16,21 @@ import (
 
 var AllowedDocMIMEs = []string{"application/pdf"}
 var AllowedImageMIMEs = []string{"image/jpeg", "image/png", "image/webp"}
+
+func ValidateSquareDimensions(file multipart.File) error {
+	cfg, _, err := image.DecodeConfig(file)
+	if seeker, ok := file.(io.Seeker); ok {
+		seeker.Seek(0, io.SeekStart)
+	}
+	if err != nil {
+		// Unknown format (e.g. WebP) — skip dimension check; MIME validation already ran
+		return nil
+	}
+	if cfg.Width != cfg.Height {
+		return fmt.Errorf("image must be square (%dx%d provided)", cfg.Width, cfg.Height)
+	}
+	return nil
+}
 
 func ValidateFileMIME(file multipart.File, allowed []string) error {
 	mtype, err := mimetype.DetectReader(file)

@@ -38,6 +38,7 @@ func ListCustomBooks(c *gin.Context) {
 		Preload("Subjects").
 		Preload("Classes")
 
+	q = q.Order("books.title ASC")
 	q.Count(&total)
 	q.Limit(pg.PerPage).Offset(pg.Offset).Find(&books)
 

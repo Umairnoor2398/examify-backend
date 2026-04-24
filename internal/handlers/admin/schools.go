@@ -68,6 +68,8 @@ func ListSchools(c *gin.Context) {
 
 	if col, ok := allowedSchoolSortColumns[sortBy]; ok {
 		q = q.Order(col + " " + sortOrder)
+	} else {
+		q = q.Order("schools.created_at DESC")
 	}
 
 	q.Count(&total)

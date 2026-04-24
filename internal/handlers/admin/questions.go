@@ -53,6 +53,7 @@ func ListQuestions(c *gin.Context) {
 			Where("question_tags.tag = ?", tag)
 	}
 
+	q = q.Order("questions.created_at ASC")
 	q.Count(&total)
 	q.Limit(pg.PerPage).Offset(pg.Offset).Find(&questions)
 

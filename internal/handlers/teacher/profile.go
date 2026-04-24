@@ -61,6 +61,10 @@ func UploadAvatar(c *gin.Context, cfg *config.Config) {
 		response.BadRequest(c, err.Error())
 		return
 	}
+	if err := utils.ValidateSquareDimensions(file); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
 
 	avatarURL, err := utils.SaveUploadedFile(file, header, cfg.Upload.Dir, "avatars", cfg.Upload.MaxSize)
 	if err != nil {
