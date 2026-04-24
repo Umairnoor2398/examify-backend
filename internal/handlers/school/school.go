@@ -29,7 +29,11 @@ func GetProfile(c *gin.Context) {
 	response.Success(c, gin.H{
 		"school": school,
 		"user": gin.H{
-			"id": user.ID, "username": user.Username, "email": user.Email,
+			"id":            user.ID,
+			"username":      user.Username,
+			"email":         user.Email,
+			"contact_email": user.ContactEmail,
+			"avatar_url":    user.AvatarURL,
 		},
 	}, "")
 }
@@ -39,6 +43,7 @@ type updateProfileRequest struct {
 	Address       string `json:"address"`
 	ContactNumber string `json:"contact_number"`
 	ContactPerson string `json:"contact_person"`
+	ContactEmail  string `json:"contact_email"`
 }
 
 func UpdateProfile(c *gin.Context) {
@@ -59,6 +64,11 @@ func UpdateProfile(c *gin.Context) {
 		"name": req.Name, "address": req.Address,
 		"contact_number": req.ContactNumber, "contact_person": req.ContactPerson,
 	})
+
+	// contact_email lives on the user record
+	if req.ContactEmail != "" {
+		database.DB.Model(&models.User{}).Where("id = ?", userID).Update("contact_email", req.ContactEmail)
+	}
 	response.Success(c, school, "Profile updated")
 }
 
@@ -77,7 +87,12 @@ func UploadLogo(c *gin.Context, cfg *config.Config) {
 	}
 	defer file.Close()
 
-	logoURL, err := utils.SaveUploadedFile(file, header, cfg.Upload.Dir, "logos")
+	if err := utils.ValidateFileMIME(file, utils.AllowedImageMIMEs); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	logoURL, err := utils.SaveUploadedFile(file, header, cfg.Upload.Dir, "logos", cfg.Upload.MaxSize)
 	if err != nil {
 		response.InternalError(c, "Failed to upload logo")
 		return
@@ -85,4 +100,32 @@ func UploadLogo(c *gin.Context, cfg *config.Config) {
 
 	database.DB.Model(school).Update("logo_url", logoURL)
 	response.Success(c, gin.H{"logo_url": logoURL}, "Logo uploaded")
+}
+
+func UploadAvatar(c *gin.Context, cfg *config.Config) {
+	userID := c.GetString("user_id")
+
+	file, header, err := c.Request.FormFile("avatar")
+	if err != nil {
+		response.BadRequest(c, "Avatar image required")
+		return
+	}
+	defer file.Close()
+
+	if err := utils.ValidateFileMIME(file, utils.AllowedImageMIMEs); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	avatarURL, err := utils.SaveUploadedFile(file, header, cfg.Upload.Dir, "avatars", cfg.Upload.MaxSize)
+	if err != nil {
+		response.InternalError(c, "Failed to upload avatar")
+		return
+	}
+
+	if err := database.DB.Model(&models.User{}).Where("id = ?", userID).Update("avatar_url", avatarURL).Error; err != nil {
+		response.InternalError(c, "Failed to save avatar")
+		return
+	}
+	response.Success(c, gin.H{"avatar_url": avatarURL}, "Avatar uploaded")
 }

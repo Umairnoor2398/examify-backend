@@ -4,12 +4,13 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Umairnoor2398/examify-backend/internal/config"
 	"github.com/Umairnoor2398/examify-backend/internal/database"
-	authHandler "github.com/Umairnoor2398/examify-backend/internal/handlers/auth"
 	adminHandler "github.com/Umairnoor2398/examify-backend/internal/handlers/admin"
+	authHandler "github.com/Umairnoor2398/examify-backend/internal/handlers/auth"
 	schoolHandler "github.com/Umairnoor2398/examify-backend/internal/handlers/school"
 	teacherHandler "github.com/Umairnoor2398/examify-backend/internal/handlers/teacher"
 	"github.com/Umairnoor2398/examify-backend/internal/middleware"
@@ -44,6 +45,7 @@ func main() {
 	// Ensure upload dirs exist
 	os.MkdirAll(cfg.Upload.Dir+"/books", 0755)
 	os.MkdirAll(cfg.Upload.Dir+"/logos", 0755)
+	os.MkdirAll(cfg.Upload.Dir+"/avatars", 0755)
 
 	r := gin.Default()
 
@@ -57,18 +59,40 @@ func main() {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	// Serve uploaded files
-	r.Static("/uploads", cfg.Upload.Dir)
+	// Serve uploaded files without directory listing
+	r.GET("/uploads/*fp", func(c *gin.Context) {
+		filePath := filepath.Join(cfg.Upload.Dir, c.Param("fp"))
+		info, err := os.Stat(filePath)
+		if err != nil || info.IsDir() {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		c.File(filePath)
+	})
+
+	// HTTPS redirect in production (behind a reverse proxy that sets X-Forwarded-Proto)
+	if cfg.App.Env == "production" {
+		r.Use(func(c *gin.Context) {
+			if c.Request.Header.Get("X-Forwarded-Proto") == "http" {
+				c.Redirect(http.StatusMovedPermanently, "https://"+c.Request.Host+c.Request.RequestURI)
+				c.Abort()
+				return
+			}
+			c.Next()
+		})
+	}
 
 	auth := authHandler.NewHandler(cfg)
 
 	v1 := r.Group("/api/v1")
 	{
-		// Public auth routes
+		// Public auth routes (rate-limited)
 		authRoutes := v1.Group("/auth")
+		authRoutes.Use(middleware.RateLimit())
 		{
 			authRoutes.POST("/login", auth.Login)
 			authRoutes.POST("/refresh", auth.RefreshToken)
+			authRoutes.POST("/logout", auth.Logout)
 			authRoutes.POST("/forgot-password", auth.ForgotPassword)
 			authRoutes.POST("/reset-password", auth.ResetPassword)
 		}
@@ -83,8 +107,13 @@ func main() {
 
 		// Admin routes
 		adminRoutes := v1.Group("/admin")
-		adminRoutes.Use(middleware.Auth(cfg), middleware.RequireRole(models.RoleAdmin))
+		adminRoutes.Use(middleware.Auth(cfg), middleware.RequireRole(models.RoleAdmin), middleware.Audit())
 		{
+			// Profile
+			adminRoutes.GET("/profile", adminHandler.GetProfile)
+			adminRoutes.PUT("/profile", adminHandler.UpdateProfile)
+			adminRoutes.POST("/profile/avatar", func(c *gin.Context) { adminHandler.UploadAvatar(c, cfg) })
+
 			// Schools
 			adminRoutes.GET("/schools", adminHandler.ListSchools)
 			adminRoutes.POST("/schools", adminHandler.CreateSchool)
@@ -139,11 +168,12 @@ func main() {
 
 		// School-Admin routes
 		schoolRoutes := v1.Group("/school")
-		schoolRoutes.Use(middleware.Auth(cfg), middleware.RequireRole(models.RoleSchoolAdmin))
+		schoolRoutes.Use(middleware.Auth(cfg), middleware.RequireRole(models.RoleSchoolAdmin), middleware.Audit())
 		{
 			schoolRoutes.GET("/profile", schoolHandler.GetProfile)
 			schoolRoutes.PUT("/profile", schoolHandler.UpdateProfile)
 			schoolRoutes.POST("/profile/logo", func(c *gin.Context) { schoolHandler.UploadLogo(c, cfg) })
+			schoolRoutes.POST("/profile/avatar", func(c *gin.Context) { schoolHandler.UploadAvatar(c, cfg) })
 
 			// Teachers
 			schoolRoutes.GET("/teachers", schoolHandler.ListTeachers)
@@ -188,8 +218,13 @@ func main() {
 
 		// Teacher routes
 		teacherRoutes := v1.Group("/teacher")
-		teacherRoutes.Use(middleware.Auth(cfg), middleware.RequireRole(models.RoleTeacher))
+		teacherRoutes.Use(middleware.Auth(cfg), middleware.RequireRole(models.RoleTeacher), middleware.Audit())
 		{
+			// Profile
+			teacherRoutes.GET("/profile", teacherHandler.GetProfile)
+			teacherRoutes.PUT("/profile", teacherHandler.UpdateProfile)
+			teacherRoutes.POST("/profile/avatar", func(c *gin.Context) { teacherHandler.UploadAvatar(c, cfg) })
+
 			teacherRoutes.GET("/classes", teacherHandler.ListFilteredClasses)
 			teacherRoutes.GET("/subjects", teacherHandler.ListFilteredSubjects)
 			teacherRoutes.GET("/books", teacherHandler.ListBooks)

@@ -1,11 +1,14 @@
 package school
 
 import (
+	"strings"
+
 	"github.com/Umairnoor2398/examify-backend/internal/database"
 	"github.com/Umairnoor2398/examify-backend/internal/models"
 	"github.com/Umairnoor2398/examify-backend/internal/utils"
 	"github.com/Umairnoor2398/examify-backend/pkg/response"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type createTeacherRequest struct {
@@ -19,6 +22,14 @@ type disableTeacherRequest struct {
 	DeletePapers bool `json:"delete_papers"`
 }
 
+var allowedTeacherSortColumns = map[string]string{
+	"username":    "u.username",
+	"email":       "u.email",
+	"is_active":   "u.is_active",
+	"paper_count": "paper_count",
+	"created_at":  "u.created_at",
+}
+
 func ListTeachers(c *gin.Context) {
 	userID := c.GetString("user_id")
 	school, err := getSchoolByUserID(userID)
@@ -27,29 +38,54 @@ func ListTeachers(c *gin.Context) {
 		return
 	}
 
-	type teacherWithPaperCount struct {
-		models.User
-		PaperCount int64 `json:"paper_count"`
+	pg := utils.GetPagination(c)
+	sortBy := c.DefaultQuery("sort_by", "")
+	sortOrder := strings.ToUpper(c.DefaultQuery("sort_order", "ASC"))
+	if sortOrder != "ASC" && sortOrder != "DESC" {
+		sortOrder = "ASC"
 	}
 
-	var teachers []models.User
+	orderClause := "u.created_at ASC"
+	if col, ok := allowedTeacherSortColumns[sortBy]; ok {
+		orderClause = col + " " + sortOrder
+	}
+
+	type teacherRow struct {
+		ID         string `json:"id"`
+		Username   string `json:"username"`
+		Email      string `json:"email"`
+		IsActive   bool   `json:"is_active"`
+		AvatarURL  string `json:"avatar_url"`
+		PaperCount int64  `json:"paper_count"`
+	}
+
+	var total int64
 	database.DB.Raw(`
-		SELECT u.* FROM users u
+		SELECT COUNT(*)
+		FROM users u
 		JOIN teacher_schools ts ON ts.user_id = u.id
 		WHERE ts.school_id = ? AND u.deleted_at IS NULL
-	`, school.ID).Scan(&teachers)
+	`, school.ID).Scan(&total)
 
-	result := make([]gin.H, len(teachers))
-	for i, t := range teachers {
-		var count int64
-		database.DB.Model(&models.Paper{}).Where("created_by = ?", t.ID).Count(&count)
-		result[i] = gin.H{
-			"id": t.ID, "username": t.Username, "email": t.Email,
-			"is_active": t.IsActive, "paper_count": count,
-		}
-	}
+	var teachers []teacherRow
+	database.DB.Raw(`
+		SELECT u.id, u.username, u.email, u.is_active, u.avatar_url,
+		       COUNT(p.id) AS paper_count
+		FROM users u
+		JOIN teacher_schools ts ON ts.user_id = u.id
+		LEFT JOIN papers p ON p.created_by = u.id AND p.deleted_at IS NULL
+		WHERE ts.school_id = ? AND u.deleted_at IS NULL
+		GROUP BY u.id, u.username, u.email, u.is_active, u.avatar_url, u.created_at
+		ORDER BY `+orderClause+`
+		LIMIT ? OFFSET ?
+	`, school.ID, pg.PerPage, pg.Offset).Scan(&teachers)
 
-	response.Success(c, result, "")
+	response.Paginated(c, teachers, response.PaginationMeta{
+		Total:      total,
+		Page:       pg.Page,
+		PerPage:    pg.PerPage,
+		TotalPages: utils.TotalPages(total, pg.PerPage),
+	})
 }
 
 func CreateTeacher(c *gin.Context) {
@@ -78,6 +114,8 @@ func CreateTeacher(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
+	req.Username = strings.TrimSpace(req.Username)
+	req.Email = strings.TrimSpace(req.Email)
 
 	var existing models.User
 	if err := database.DB.Where("email = ? OR username = ?", req.Email, req.Username).First(&existing).Error; err == nil {
@@ -142,17 +180,22 @@ func ToggleTeacher(c *gin.Context) {
 
 	newStatus := !teacher.IsActive
 
-	if !newStatus && req.DeletePapers {
-		// Delete all papers by this teacher
-		database.DB.Where("created_by = ?", teacherID).Delete(&models.Paper{})
-	} else if !newStatus && !req.DeletePapers {
-		// Re-link papers to school admin
-		database.DB.Model(&models.Paper{}).
-			Where("created_by = ?", teacherID).
-			Update("created_by", userID)
+	txErr := database.DB.Transaction(func(tx *gorm.DB) error {
+		if !newStatus && req.DeletePapers {
+			if err := tx.Where("created_by = ?", teacherID).Delete(&models.Paper{}).Error; err != nil {
+				return err
+			}
+		} else if !newStatus && !req.DeletePapers {
+			if err := tx.Model(&models.Paper{}).Where("created_by = ?", teacherID).Update("created_by", userID).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Model(&teacher).Update("is_active", newStatus).Error
+	})
+	if txErr != nil {
+		response.InternalError(c, "Failed to update teacher status")
+		return
 	}
-
-	database.DB.Model(&teacher).Update("is_active", newStatus)
 
 	msg := "Teacher account enabled"
 	if !newStatus {

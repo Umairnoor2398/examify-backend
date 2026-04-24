@@ -33,6 +33,23 @@ type Base struct {
 	DeletedAt *time.Time `gorm:"index" json:"deleted_at,omitempty"`
 }
 
+type AuditLog struct {
+	ID         string    `gorm:"type:varchar(36);primaryKey" json:"id"`
+	UserID     string    `gorm:"type:varchar(36);index;not null" json:"user_id"`
+	UserRole   string    `gorm:"type:varchar(50);not null" json:"user_role"`
+	Action     string    `gorm:"type:varchar(10);not null" json:"action"`
+	Resource   string    `gorm:"type:varchar(255);not null" json:"resource"`
+	StatusCode int       `gorm:"not null" json:"status_code"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+type RevokedToken struct {
+	ID        string    `gorm:"type:varchar(36);primaryKey" json:"id"`
+	Token     string    `gorm:"type:varchar(700);uniqueIndex;not null" json:"token"`
+	ExpiresAt time.Time `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type User struct {
 	Base
 	Username     string `gorm:"type:varchar(100);uniqueIndex;not null" json:"username"`
@@ -40,6 +57,8 @@ type User struct {
 	PasswordHash string `gorm:"type:varchar(255);not null" json:"-"`
 	Role         Role   `gorm:"type:enum('admin','school_admin','teacher');not null" json:"role"`
 	IsActive     bool   `gorm:"default:true" json:"is_active"`
+	ContactEmail string `gorm:"type:varchar(255)" json:"contact_email"`
+	AvatarURL    string `gorm:"type:varchar(500)" json:"avatar_url"`
 }
 
 type PasswordResetToken struct {
@@ -103,7 +122,7 @@ type Book struct {
 
 type Chapter struct {
 	Base
-	BookID      string      `gorm:"type:varchar(36);not null" json:"book_id"`
+	BookID      string      `gorm:"type:varchar(36);not null;index" json:"book_id"`
 	Name        string      `gorm:"type:varchar(500);not null" json:"name"`
 	Description string      `gorm:"type:text" json:"description"`
 	OrderIndex  int         `gorm:"default:0" json:"order_index"`
@@ -113,7 +132,7 @@ type Chapter struct {
 
 type Question struct {
 	Base
-	ChapterID  string       `gorm:"type:varchar(36);not null" json:"chapter_id"`
+	ChapterID  string       `gorm:"type:varchar(36);not null;index" json:"chapter_id"`
 	Type       QuestionType `gorm:"type:enum('mcq','short','descriptive');not null" json:"type"`
 	Text       string       `gorm:"type:text;not null" json:"text"`
 	Difficulty Difficulty   `gorm:"type:enum('easy','medium','hard');not null" json:"difficulty"`
@@ -138,17 +157,17 @@ type QuestionAnswerKey struct {
 
 type QuestionTag struct {
 	ID         string `gorm:"type:varchar(36);primaryKey" json:"id"`
-	QuestionID string `gorm:"type:varchar(36);not null" json:"question_id"`
+	QuestionID string `gorm:"type:varchar(36);not null;index" json:"question_id"`
 	Tag        string `gorm:"type:varchar(100);not null" json:"tag"`
 }
 
 type Paper struct {
 	Base
 	Name      string      `gorm:"type:varchar(500);not null" json:"name"`
-	SchoolID  string      `gorm:"type:varchar(36);not null" json:"school_id"`
-	CreatedBy string      `gorm:"type:varchar(36);not null" json:"created_by"`
-	Status    PaperStatus `gorm:"type:enum('draft','submitted');default:'draft'" json:"status"`
-	BookID    string      `gorm:"type:varchar(36);not null" json:"book_id"`
+	SchoolID  string      `gorm:"type:varchar(36);not null;index" json:"school_id"`
+	CreatedBy string      `gorm:"type:varchar(36);not null;index" json:"created_by"`
+	Status    PaperStatus `gorm:"type:enum('draft','submitted');default:'draft';index" json:"status"`
+	BookID    string      `gorm:"type:varchar(36);not null;index" json:"book_id"`
 	School    School      `gorm:"foreignKey:SchoolID" json:"school,omitempty"`
 	Creator   User        `gorm:"foreignKey:CreatedBy" json:"creator,omitempty"`
 	Book      Book        `gorm:"foreignKey:BookID" json:"book,omitempty"`

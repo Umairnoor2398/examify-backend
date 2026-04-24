@@ -56,5 +56,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&models.PaperQuestion{},
 		&models.PaperConfig{},
 		&models.TeacherSchool{},
+		&models.RevokedToken{},
+		&models.AuditLog{},
 	)
 }

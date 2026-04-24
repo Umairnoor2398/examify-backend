@@ -1,11 +1,14 @@
 package admin
 
 import (
+	"strings"
+
 	"github.com/Umairnoor2398/examify-backend/internal/database"
 	"github.com/Umairnoor2398/examify-backend/internal/models"
 	"github.com/Umairnoor2398/examify-backend/internal/utils"
 	"github.com/Umairnoor2398/examify-backend/pkg/response"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type createSchoolRequest struct {
@@ -17,26 +20,49 @@ type createSchoolRequest struct {
 }
 
 type updateSchoolRequest struct {
-	Name          string   `json:"name"`
-	Address       string   `json:"address"`
-	ContactNumber string   `json:"contact_number"`
-	ContactPerson string   `json:"contact_person"`
-	CurriculaIDs  []string `json:"curricula_ids"`
+	Name           string   `json:"name"`
+	Address        string   `json:"address"`
+	ContactNumber  string   `json:"contact_number"`
+	ContactPerson  string   `json:"contact_person"`
+	CurriculaIDs   []string `json:"curricula_ids"`
+	MaxTeachers    *int     `json:"max_teachers"`
+	MaxCustomBooks *int     `json:"max_custom_books"`
+}
+
+// allowedSchoolSortColumns maps frontend sort_by values to safe SQL column expressions.
+var allowedSchoolSortColumns = map[string]string{
+	"name":             "schools.name",
+	"contact_person":   "schools.contact_person",
+	"max_teachers":     "schools.max_teachers",
+	"max_custom_books": "schools.max_custom_books",
+	"created_at":       "schools.created_at",
+	"email":            "users.email",
+	"status":           "users.is_active",
 }
 
 func ListSchools(c *gin.Context) {
 	pg := utils.GetPagination(c)
 	search := c.Query("search")
+	sortBy := c.DefaultQuery("sort_by", "")
+	sortOrder := strings.ToUpper(c.DefaultQuery("sort_order", "ASC"))
+	if sortOrder != "ASC" && sortOrder != "DESC" {
+		sortOrder = "ASC"
+	}
 
 	var schools []models.School
 	var total int64
 
 	q := database.DB.Model(&models.School{}).
+		Joins("JOIN users ON users.id = schools.user_id").
 		Preload("User").
 		Preload("Curricula")
 
 	if search != "" {
-		q = q.Where("name LIKE ? OR contact_person LIKE ?", "%"+search+"%", "%"+search+"%")
+		q = q.Where("schools.name LIKE ? OR schools.contact_person LIKE ?", "%"+search+"%", "%"+search+"%")
+	}
+
+	if col, ok := allowedSchoolSortColumns[sortBy]; ok {
+		q = q.Order(col + " " + sortOrder)
 	}
 
 	q.Count(&total)
@@ -56,6 +82,8 @@ func CreateSchool(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
+	req.Username = strings.TrimSpace(req.Username)
+	req.Email = strings.TrimSpace(req.Email)
 
 	var existing models.User
 	if err := database.DB.Where("email = ? OR username = ?", req.Email, req.Username).First(&existing).Error; err == nil {
@@ -70,34 +98,35 @@ func CreateSchool(c *gin.Context) {
 	}
 
 	userID := utils.NewUUID()
-	user := models.User{
-		Base:         models.Base{ID: userID},
-		Username:     req.Username,
-		Email:        req.Email,
-		PasswordHash: hash,
-		Role:         models.RoleSchoolAdmin,
-		IsActive:     true,
-	}
+	schoolID := utils.NewUUID()
 
-	if err := database.DB.Create(&user).Error; err != nil {
-		response.InternalError(c, "Failed to create account")
+	err = database.DB.Transaction(func(tx *gorm.DB) error {
+		user := models.User{
+			Base:         models.Base{ID: userID},
+			Username:     req.Username,
+			Email:        req.Email,
+			PasswordHash: hash,
+			Role:         models.RoleSchoolAdmin,
+			IsActive:     true,
+		}
+		if err := tx.Create(&user).Error; err != nil {
+			return err
+		}
+		school := models.School{
+			Base:           models.Base{ID: schoolID},
+			UserID:         userID,
+			MaxTeachers:    req.MaxTeachers,
+			MaxCustomBooks: req.MaxCustomBooks,
+		}
+		return tx.Create(&school).Error
+	})
+	if err != nil {
+		response.InternalError(c, "Failed to create school account")
 		return
 	}
 
-	school := models.School{
-		Base:           models.Base{ID: utils.NewUUID()},
-		UserID:         userID,
-		MaxTeachers:    req.MaxTeachers,
-		MaxCustomBooks: req.MaxCustomBooks,
-	}
-
-	if err := database.DB.Create(&school).Error; err != nil {
-		database.DB.Delete(&user)
-		response.InternalError(c, "Failed to create school")
-		return
-	}
-
-	database.DB.Preload("User").Preload("Curricula").First(&school, "id = ?", school.ID)
+	var school models.School
+	database.DB.Preload("User").Preload("Curricula").First(&school, "id = ?", schoolID)
 	response.Created(c, school, "School account created successfully")
 }
 
@@ -120,7 +149,7 @@ func UpdateSchool(c *gin.Context) {
 	}
 
 	var school models.School
-	if err := database.DB.First(&school, "id = ?", id).Error; err != nil {
+	if err := database.DB.Preload("Curricula").First(&school, "id = ?", id).Error; err != nil {
 		response.NotFound(c, "School not found")
 		return
 	}
@@ -131,10 +160,19 @@ func UpdateSchool(c *gin.Context) {
 		"contact_number": req.ContactNumber,
 		"contact_person": req.ContactPerson,
 	}
-
+	if req.MaxTeachers != nil {
+		updates["max_teachers"] = *req.MaxTeachers
+	}
+	if req.MaxCustomBooks != nil {
+		updates["max_custom_books"] = *req.MaxCustomBooks
+	}
 	database.DB.Model(&school).Updates(updates)
 
 	if req.CurriculaIDs != nil {
+		if len(school.Curricula) > 0 {
+			response.UnprocessableEntity(c, "Curriculum cannot be changed after initial assignment")
+			return
+		}
 		var curricula []models.Curriculum
 		database.DB.Where("id IN ?", req.CurriculaIDs).Find(&curricula)
 		database.DB.Model(&school).Association("Curricula").Replace(curricula)

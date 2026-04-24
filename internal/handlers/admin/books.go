@@ -150,7 +150,12 @@ func UploadBookPDF(c *gin.Context, cfg *config.Config) {
 	}
 	defer file.Close()
 
-	pdfURL, err := utils.SaveUploadedFile(file, header, cfg.Upload.Dir, "books")
+	if err := utils.ValidateFileMIME(file, utils.AllowedDocMIMEs); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	pdfURL, err := utils.SaveUploadedFile(file, header, cfg.Upload.Dir, "books", cfg.Upload.MaxSize)
 	if err != nil {
 		response.InternalError(c, "Failed to save file")
 		return

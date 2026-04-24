@@ -31,6 +31,10 @@ type refreshRequest struct {
 	RefreshToken string `json:"refresh_token" binding:"required"`
 }
 
+type logoutRequest struct {
+	RefreshToken string `json:"refresh_token" binding:"required"`
+}
+
 type forgotPasswordRequest struct {
 	Email string `json:"email" binding:"required,email"`
 }
@@ -79,12 +83,34 @@ func (h *Handler) Login(c *gin.Context) {
 		"access_token":  accessToken,
 		"refresh_token": refreshToken,
 		"user": gin.H{
-			"id":       user.ID,
-			"username": user.Username,
-			"email":    user.Email,
-			"role":     user.Role,
+			"id":            user.ID,
+			"username":      user.Username,
+			"email":         user.Email,
+			"role":          user.Role,
+			"contact_email": user.ContactEmail,
+			"avatar_url":    user.AvatarURL,
 		},
 	}, "Login successful")
+}
+
+func (h *Handler) Logout(c *gin.Context) {
+	var req logoutRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	claims, err := utils.ParseToken(req.RefreshToken, h.cfg.JWT.RefreshSecret)
+	if err == nil && claims.Type == "refresh" {
+		revoked := models.RevokedToken{
+			ID:        utils.NewUUID(),
+			Token:     req.RefreshToken,
+			ExpiresAt: claims.ExpiresAt.Time,
+		}
+		database.DB.Create(&revoked)
+	}
+
+	response.Success(c, nil, "Logged out")
 }
 
 func (h *Handler) RefreshToken(c *gin.Context) {
@@ -96,6 +122,12 @@ func (h *Handler) RefreshToken(c *gin.Context) {
 
 	claims, err := utils.ParseToken(req.RefreshToken, h.cfg.JWT.RefreshSecret)
 	if err != nil || claims.Type != "refresh" {
+		response.Unauthorized(c, "Invalid or expired refresh token")
+		return
+	}
+
+	var revoked models.RevokedToken
+	if err := database.DB.Where("token = ?", req.RefreshToken).First(&revoked).Error; err == nil {
 		response.Unauthorized(c, "Invalid or expired refresh token")
 		return
 	}
@@ -125,10 +157,12 @@ func (h *Handler) Me(c *gin.Context) {
 	}
 
 	response.Success(c, gin.H{
-		"id":       user.ID,
-		"username": user.Username,
-		"email":    user.Email,
-		"role":     user.Role,
+		"id":            user.ID,
+		"username":      user.Username,
+		"email":         user.Email,
+		"role":          user.Role,
+		"contact_email": user.ContactEmail,
+		"avatar_url":    user.AvatarURL,
 	}, "")
 }
 
@@ -170,7 +204,11 @@ func (h *Handler) ForgotPassword(c *gin.Context) {
 	database.DB.Create(&resetToken)
 
 	resetURL := h.cfg.App.URL + "/reset-password?token=" + token
-	go utils.SendPasswordResetEmail(h.cfg, user.Email, resetURL)
+	emailTo := user.ContactEmail
+	if emailTo == "" {
+		emailTo = user.Email
+	}
+	go utils.SendPasswordResetEmail(h.cfg, emailTo, resetURL)
 
 	response.Success(c, nil, "If that email exists, a reset link has been sent.")
 }
