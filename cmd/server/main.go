@@ -39,6 +39,10 @@ func main() {
 		log.Fatalf("Failed to run migrations: %v", err)
 	}
 
+	if err := database.ApplyColumnComments(db); err != nil {
+		log.Fatalf("Failed to apply column comments: %v", err)
+	}
+
 	// Create default admin if not exists
 	seedAdmin(cfg)
 
