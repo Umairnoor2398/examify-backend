@@ -43,6 +43,10 @@ func main() {
 		log.Fatalf("Failed to apply column comments: %v", err)
 	}
 
+	if err := database.CreateStoredProcedures(db); err != nil {
+		log.Fatalf("Failed to create stored procedures: %v", err)
+	}
+
 	// Create default admin if not exists
 	seedAdmin(cfg)
 
@@ -124,6 +128,7 @@ func main() {
 			adminRoutes.GET("/schools/:id", adminHandler.GetSchool)
 			adminRoutes.PUT("/schools/:id", adminHandler.UpdateSchool)
 			adminRoutes.DELETE("/schools/:id", adminHandler.DeleteSchool)
+			adminRoutes.DELETE("/schools/:id/hard", adminHandler.HardDeleteSchool)
 			adminRoutes.PATCH("/schools/:id/toggle", adminHandler.ToggleSchoolStatus)
 
 			// Curricula

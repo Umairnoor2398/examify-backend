@@ -11,6 +11,11 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	schoolIDFilter    = "id = ?"
+	msgSchoolNotFound = "School not found"
+)
+
 type createSchoolRequest struct {
 	Username       string `json:"username" binding:"required,min=3"`
 	Email          string `json:"email" binding:"required,email"`
@@ -126,15 +131,15 @@ func CreateSchool(c *gin.Context) {
 	}
 
 	var school models.School
-	database.DB.Preload("User").Preload("Curricula").First(&school, "id = ?", schoolID)
+	database.DB.Preload("User").Preload("Curricula").First(&school, schoolIDFilter, schoolID)
 	response.Created(c, school, "School account created successfully")
 }
 
 func GetSchool(c *gin.Context) {
 	id := c.Param("id")
 	var school models.School
-	if err := database.DB.Preload("User").Preload("Curricula").First(&school, "id = ?", id).Error; err != nil {
-		response.NotFound(c, "School not found")
+	if err := database.DB.Preload("User").Preload("Curricula").First(&school, schoolIDFilter, id).Error; err != nil {
+		response.NotFound(c, msgSchoolNotFound)
 		return
 	}
 	response.Success(c, school, "")
@@ -149,8 +154,8 @@ func UpdateSchool(c *gin.Context) {
 	}
 
 	var school models.School
-	if err := database.DB.Preload("Curricula").First(&school, "id = ?", id).Error; err != nil {
-		response.NotFound(c, "School not found")
+	if err := database.DB.Preload("Curricula").First(&school, schoolIDFilter, id).Error; err != nil {
+		response.NotFound(c, msgSchoolNotFound)
 		return
 	}
 
@@ -178,38 +183,59 @@ func UpdateSchool(c *gin.Context) {
 		database.DB.Model(&school).Association("Curricula").Replace(curricula)
 	}
 
-	database.DB.Preload("User").Preload("Curricula").First(&school, "id = ?", id)
+	database.DB.Preload("User").Preload("Curricula").First(&school, schoolIDFilter, id)
 	response.Success(c, school, "School updated successfully")
 }
 
 func DeleteSchool(c *gin.Context) {
 	id := c.Param("id")
-	var school models.School
-	if err := database.DB.Preload("User").First(&school, "id = ?", id).Error; err != nil {
-		response.NotFound(c, "School not found")
+	if err := database.DB.First(&models.School{}, schoolIDFilter, id).Error; err != nil {
+		response.NotFound(c, msgSchoolNotFound)
 		return
 	}
 
-	database.DB.Model(&school.User).Update("is_active", false)
-	database.DB.Delete(&school)
+	if err := database.DB.Exec("CALL sp_school_set_status(?, ?)", id, "soft_delete").Error; err != nil {
+		response.InternalError(c, "Failed to delete school")
+		return
+	}
 
 	response.Success(c, nil, "School deleted successfully")
+}
+
+func HardDeleteSchool(c *gin.Context) {
+	id := c.Param("id")
+	if err := database.DB.Unscoped().First(&models.School{}, schoolIDFilter, id).Error; err != nil {
+		response.NotFound(c, msgSchoolNotFound)
+		return
+	}
+
+	if err := database.DB.Exec("CALL sp_school_hard_delete(?)", id).Error; err != nil {
+		response.InternalError(c, "Failed to permanently delete school")
+		return
+	}
+
+	response.Success(c, nil, "School permanently deleted")
 }
 
 func ToggleSchoolStatus(c *gin.Context) {
 	id := c.Param("id")
 	var school models.School
-	if err := database.DB.Preload("User").First(&school, "id = ?", id).Error; err != nil {
-		response.NotFound(c, "School not found")
+	if err := database.DB.Preload("User").First(&school, schoolIDFilter, id).Error; err != nil {
+		response.NotFound(c, msgSchoolNotFound)
 		return
 	}
 
-	newStatus := !school.User.IsActive
-	database.DB.Model(&school.User).Update("is_active", newStatus)
-
+	action := "activate"
 	msg := "School activated"
-	if !newStatus {
+	if school.User.IsActive {
+		action = "deactivate"
 		msg = "School deactivated"
 	}
+
+	if err := database.DB.Exec("CALL sp_school_set_status(?, ?)", id, action).Error; err != nil {
+		response.InternalError(c, "Failed to update school status")
+		return
+	}
+
 	response.Success(c, nil, msg)
 }
